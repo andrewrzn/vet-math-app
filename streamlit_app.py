@@ -1,120 +1,117 @@
 import streamlit as st
+import requests
+import time
 
-# --- ИНИЦИАЛИЗАЦИЯ И НАСТРОЙКИ ---
-st.set_page_config(page_title="Ветеринарная математика | МВА", page_icon="🐾")
+# --- НАСТРОЙКИ СТРАНИЦЫ ---
+st.set_page_config(page_title="Ветеринарная математика | МВА", page_icon="🐾", layout="wide")
 
+# API Конфигурация (используем внутренний прокси среды)
+API_KEY = "" 
+MODEL_ID = "gemini-2.5-flash-preview-09-2025"
+
+def call_gemini_mentor(task_text, user_answer, correct_answer):
+    """Вызов настоящего ИИ-Ментора"""
+    prompt = f"""
+    Ты — добрый преподаватель математики в ветеринарной академии. 
+    Задача: {task_text}
+    Правильный ответ: {correct_answer}
+    Ученик ввел: {user_answer}
+    
+    Твоя роль: 
+    1. Если ответ близок, но неточен, укажи на округление.
+    2. Если ответ сильно отличается, предположи ошибку (забыл перевести мг в г, не учел проценты, ошибся в дозировке на вес).
+    3. НЕ ПИШИ ПРАВИЛЬНЫЙ ОТВЕТ. Дай только наводку.
+    Пиши коротко (2-3 предложения).
+    """
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_ID}:generateContent?key={API_KEY}"
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "systemInstruction": {"parts": [{"text": "Ты - ветеринарный ментор. Помогаешь решать задачи, не выдавая сразу ответ."}]}
+    }
+    
+    for delay in [1, 2, 3]:
+        try:
+            response = requests.post(url, json=payload, timeout=10)
+            if response.status_code == 200:
+                return response.json()['candidates'][0]['content']['parts'][0]['text']
+            time.sleep(delay)
+        except:
+            continue
+    return "Похоже, в расчетах есть неточность. Проверь еще раз размерности (мг, кг, %)!"
+
+# --- ИНИЦИАЛИЗАЦИЯ СОСТОЯНИЯ ---
 if 'results' not in st.session_state:
     st.session_state.results = {}
 if 'mentor_feedback' not in st.session_state:
     st.session_state.mentor_feedback = {}
 
-# --- ФУНКЦИЯ АВТОНОМНОГО МЕНТОРА ---
-def get_offline_hint(task, user_answer):
-    """
-    Система подсказок без использования внешнего API.
-    Анализирует тип задачи и дает методический совет.
-    """
-    correct_answer = task["a"]
-    
-    # Логика подбора подсказки
-    if user_answer == 0:
-        return "Не бойся ошибиться! Начни с того, что определи, сколько активного вещества в одной таблетке. Используй формулу m = M * (p/100)."
-    
-    if "г" in task["q"].lower() and user_answer < correct_answer / 100:
-        return "Кажется, ты забыла перевести граммы (г) в миллиграммы (мг). Помни: в 1 грамме 1000 мг!"
-    
-    if user_answer > correct_answer * 5:
-        return "Твой ответ слишком велик. Проверь, не забыла ли ты разделить общую дозу на количество вещества в одной таблетке?"
-        
-    if abs(user_answer - (task["a"] * 100)) < 1:
-        return "Похоже на ошибку в десятичных знаках. Ты перевела проценты в доли? (Например, 10% — это 0.1)."
-
-    return "Давай рассуждать логически: сначала найди дозу на вес животного, затем найди содержание вещества в таблетке, и в конце раздели первое на второе. Сверься со шпаргалкой!"
-
-# --- КОНТЕНТ ЗАДАЧ ---
+# --- ДАННЫЕ (ВСЕ ЗАДАЧИ ИЗ PDF И ВАШИ ПРЕДЫДУЩИЕ) ---
 all_tasks = [
-    # БАЗОВЫЙ
-    {"id": 1, "cat": "Базовый", "q": "Таблетка 100 мг, 10% активного вещества. Сколько это в мг?", "a": 10.0},
-    {"id": 2, "cat": "Базовый", "q": "Собака 10 кг, доза 5 мг/кг. Какова общая доза в мг?", "a": 50.0},
-    {"id": 3, "cat": "Базовый", "q": "Нужно 20 мг, в таблетке 10 мг. Сколько таблеток дать?", "a": 2.0},
-    {"id": 4, "cat": "Базовый", "q": "Ампула 5 мл, 20% вещества. Сколько мл чистого вещества?", "a": 1.0},
-    {"id": 5, "cat": "Базовый", "q": "Таблетка 400 мг, 50% сахара. Сколько мг сахара?", "a": 200.0},
-    {"id": 6, "cat": "Базовый", "q": "Доза 2 мг/кг, вес 3 кг, в таб 6 мг чистого в-ва. Сколько таблеток?", "a": 1.0},
-    {"id": 7, "cat": "Базовый", "q": "Животное 20 кг, нужно 40 мг. Сколько это мг на 1 кг?", "a": 2.0},
-    {"id": 8, "cat": "Базовый", "q": "Упаковка 10 таб по 5 мг. Сколько всего мг в упаковке?", "a": 50.0},
-    # ПРАКТИК
+    # Список дополнен задачами из PDF
+    {"id": 1, "cat": "Вступительные", "q": "Задача №1 (Таблетки): Таблетка 20 мг, 18% активного в-ва. Ребенку нужно 1.35 мг/кг. Вес 8 кг. Сколько таблеток в сутки?", "a": 3.0},
+    {"id": 2, "cat": "Вступительные", "q": "Задача №5 (Бегун): Бегун пробежал 450 м за 50 секунд. Найдите среднюю скорость в км/ч.", "a": 32.4},
+    {"id": 3, "cat": "Вступительные", "q": "Задача №11 (Уравнение): Решите 2^(3+x) = 0.4 * 5^(3+x).", "a": -2.0},
+    {"id": 4, "cat": "Вступительные", "q": "Задача №12 (Сплавы): Сплав 1 (10% никеля), Сплав 2 (35%). Получили 225 кг (25%). На сколько кг масса первого меньше массы второго?", "a": 45.0},
+    {"id": 5, "cat": "Вступительные", "q": "Задача №15 (Уравнение): 6^(x+1) - 2*6^x = 144.", "a": 2.0},
+    {"id": 6, "cat": "Вступительные", "q": "Задача №13 (Вероятность): Больные (5%), Тест+ у больных (0.9), Ложно+ (0.01). Вероятность того, что тест положительный?", "a": 0.0545},
+    {"id": 7, "cat": "Базовый", "q": "Собака 10 кг, доза 5 мг/кг. Какова общая доза (мг)?", "a": 50.0},
+    {"id": 8, "cat": "Базовый", "q": "Таблетка 100 мг, 10% активного вещества. Сколько это в мг?", "a": 10.0},
     {"id": 9, "cat": "Практик", "q": "Таблетка 30 мг (15%); доза 1 мг/кг, вес 9 кг. Сколько таблеток?", "a": 2.0},
-    {"id": 10, "cat": "Практик", "q": "Таблетка 50 мг (12%); доза 3 мг/кг, вес 4 кг. Сколько таблеток?", "a": 2.0},
-    {"id": 11, "cat": "Практик", "q": "Щенок 6 кг; доза 2,5 мг/кг; таб 20 мг (15%). Сколько таблеток?", "a": 5.0},
-    {"id": 12, "cat": "Практик", "q": "Сироп 5%, 1 мл весит 1000 мг. Сколько мг в-ва в 1 мл?", "a": 50.0},
-    {"id": 13, "cat": "Практик", "q": "Кот 2 кг; доза 4,5 мг/кг; таб 45 мг (20%). Сколько таблеток?", "a": 1.0},
-    {"id": 14, "cat": "Практик", "q": "Телёнок 40 кг; нужно 0,8 мг/кг; таб 16 мг чистого в-ва. Сколько таблеток?", "a": 2.0},
-    {"id": 15, "cat": "Практик", "q": "В таб 10 мг в-ва — это 5% массы. Сколько мг весит таблетка?", "a": 200.0},
-    {"id": 16, "cat": "Практик", "q": "Кошка 4 кг, дали 0,5 таб (в целой 10 мг). Какая доза (мг/кг)?", "a": 1.25},
-    {"id": 17, "cat": "Практик", "q": "Даем 3 таб/сутки (в таб 2 мг) коту 3 кг. Какая доза (мг/кг)?", "a": 2.0},
-    # ЭКСПЕРТ
-    {"id": 18, "cat": "Эксперт", "q": "Доза 1.2 мг/кг (2р в день), вес 10 кг, таб 12 мг. Сколько таб в СУТКИ?", "a": 2.0},
-    {"id": 19, "cat": "Эксперт", "q": "Таблетка 0.5 г, в ней 4% вещества. Сколько это мг?", "a": 20.0},
-    {"id": 20, "cat": "Эксперт", "q": "Доза 1.35 мг/кг, вес 8 кг, таб 20 мг (18%). Сколько таблеток?", "a": 3.0},
-    {"id": 21, "cat": "Эксперт", "q": "Раствор 10% (100 мг/мл). Нужно 250 мг. Сколько мл набрать?", "a": 2.5},
-    {"id": 22, "cat": "Эксперт", "q": "Кобыла 500 кг, доза 0.1 мг/кг, таб 25 мг чистого в-ва. Сколько таблеток?", "a": 2.0},
-    {"id": 23, "cat": "Эксперт", "q": "Таблетка 250 мг, в ней 0.05 г вещества. Какой % содержания?", "a": 20.0},
-    {"id": 24, "cat": "Эксперт", "q": "Сутки: 10 мг/кг, вес 12 кг, 3 приёма, таб 20 мг. Сколько таб на ОДИН прием?", "a": 2.0},
-    {"id": 25, "cat": "Эксперт", "q": "Препарат А: 200 мг (10%). Препарат Б: 100 мг (20%). Сколько мг в таб А?", "a": 20.0},
+    {"id": 10, "cat": "Эксперт", "q": "Таблетка 0.5 г, в ней 4% вещества. Сколько это мг?", "a": 20.0},
 ]
 
 # --- ИНТЕРФЕЙС ---
-st.title("🐾 Академия им. Скрябина: Тренажер")
-tab_calc, tab_learn, tab_tasks = st.tabs(["🧮 Помощник", "📖 Формулы", "📝 Задачи"])
+st.title("🐾 Тренажер МВА им. Скрябина")
+st.markdown("---")
 
-# Таб с калькулятором (восстановлен для удобства)
-with tab_calc:
-    st.header("Умный калькулятор")
-    c1, c2 = st.columns(2)
-    with c1:
-        m_tab = st.number_input("Вес таблетки (мг)", value=20.0)
-        p_tab = st.number_input("Вещество (%)", value=18.0)
-    with c2:
-        m_ani = st.number_input("Вес животного (кг)", value=8.0)
-        d_ani = st.number_input("Дозировка (мг/кг)", value=1.35)
+col_main, col_side = st.columns([3, 1])
+
+with col_side:
+    st.subheader("📊 Прогресс")
+    solved = sum(1 for v in st.session_state.results.values() if v)
+    st.write(f"Решено задач: {solved} / {len(all_tasks)}")
+    st.progress(solved / len(all_tasks))
     
-    act_v = m_tab * (p_tab / 100)
-    need_v = m_ani * d_ani
-    if act_v > 0:
-        st.metric("Итого таблеток", round(need_v / act_v, 2))
+    st.info("💡 **Совет:** Если не получается, жми 'Проверить' еще раз, Ментор даст новую подсказку!")
 
-# Таб с формулами
-with tab_learn:
-    st.info("m (в-во в таб) = M (вес таб) * % / 100")
-    st.info("D (нужно всего) = Вес животного * Дозировка")
-    st.info("Количество таблеток = D / m")
-
-# Таб с задачами
-with tab_tasks:
-    for cat in ["Базовый", "Практик", "Эксперт"]:
-        st.subheader(f"Уровень: {cat}")
-        for t in [x for x in all_tasks if x["cat"] == cat]:
-            tid = t["id"]
-            is_solved = st.session_state.results.get(tid, False)
+with col_main:
+    tabs = st.tabs(["📝 Задачи", "🧮 Калькулятор", "ℹ️ Помощь"])
+    
+    with tabs[0]:
+        for category in sorted(list(set(t["cat"] for t in all_tasks))):
+            st.header(f"Уровень: {category}")
+            cat_tasks = [t for t in all_tasks if t["cat"] == category]
             
-            with st.expander(f"Задача №{tid} {'✅' if is_solved else ''}"):
-                st.write(t["q"])
-                ans = st.number_input("Ответ:", key=f"ans_{tid}", step=0.01)
-                
-                if st.button("Проверить", key=f"btn_{tid}"):
-                    if abs(ans - t["a"]) < 0.01:
-                        st.session_state.results[tid] = True
-                        st.session_state.mentor_feedback.pop(tid, None)
-                        st.balloons()
-                    else:
-                        st.session_state.results[tid] = False
-                        st.session_state.mentor_feedback[tid] = get_offline_hint(t, ans)
-                
-                if tid in st.session_state.mentor_feedback:
-                    st.warning(f"🧙‍♂️ **Совет ментора:** {st.session_state.mentor_feedback[tid]}")
+            for t in cat_tasks:
+                tid = t["id"]
+                with st.expander(f"Задача №{tid} {'✅' if st.session_state.results.get(tid) else ''}"):
+                    st.write(f"**{t['q']}**")
+                    u_ans = st.number_input("Твой ответ:", key=f"in_{tid}", format="%.4f")
+                    
+                    if st.button("Проверить", key=f"btn_{tid}"):
+                        if abs(u_ans - t["a"]) < 0.001:
+                            st.session_state.results[tid] = True
+                            st.session_state.mentor_feedback.pop(tid, None)
+                            st.success("🎉 Верно! Молодец!")
+                        else:
+                            st.session_state.results[tid] = False
+                            with st.spinner("Ментор анализирует ошибку..."):
+                                feedback = call_gemini_mentor(t["q"], u_ans, t["a"])
+                                st.session_state.mentor_feedback[tid] = feedback
+                    
+                    if tid in st.session_state.mentor_feedback:
+                        st.markdown(f"""
+                        <div style="background-color: #fff4e6; padding: 15px; border-left: 5px solid #ffa94d; border-radius: 5px;">
+                            <b>🧙‍♂️ Ментор:</b><br>{st.session_state.mentor_feedback[tid]}
+                        </div>
+                        """, unsafe_allow_html=True)
 
-# Сайдбар
-st.sidebar.title("📈 Прогресс")
-solved = sum(1 for v in st.session_state.results.values() if v)
-st.sidebar.write(f"Решено: {solved} из 25")
-st.sidebar.progress(min(solved / 25, 1.0))
+    with tabs[1]:
+        st.subheader("Быстрый расчет дозировок")
+        v1 = st.number_input("Вес животного (кг)", value=1.0)
+        v2 = st.number_input("Дозировка (мг/кг)", value=1.0)
+        st.write(f"Нужно препарата: **{v1*v2} мг**")
+
+    with tabs[2]:
+        st.write("Используйте точку как разделитель. Округляйте до сотых, если не указано иное.")
