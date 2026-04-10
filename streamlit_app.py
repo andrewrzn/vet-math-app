@@ -1,33 +1,35 @@
 import streamlit as st
-import requests
-import time
 
 # --- ИНИЦИАЛИЗАЦИЯ И НАСТРОЙКИ ---
 st.set_page_config(page_title="Ветеринарная математика | МВА", page_icon="🐾")
-
-# Получение ключа из Secrets
-API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
 if 'results' not in st.session_state:
     st.session_state.results = {}
 if 'mentor_feedback' not in st.session_state:
     st.session_state.mentor_feedback = {}
 
-# --- ФУНКЦИЯ МЕНТОРА ---
-def call_gemini_mentor(task_text, user_answer, correct_answer):
-    if not API_KEY:
-        return "⚠️ Ошибка: API ключ не настроен в Secrets. Проверь формулу m = M * (p/100)!"
+# --- ФУНКЦИЯ АВТОНОМНОГО МЕНТОРА ---
+def get_offline_hint(task, user_answer):
+    """
+    Система подсказок без использования внешнего API.
+    Анализирует тип задачи и дает методический совет.
+    """
+    correct_answer = task["a"]
     
-    prompt = f"Ученик решает: {task_text}. Правильно: {correct_answer}, введено: {user_answer}. Подбодри и дай наводку на формулу, не называя сам ответ."
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={API_KEY}"
+    # Логика подбора подсказки
+    if user_answer == 0:
+        return "Не бойся ошибиться! Начни с того, что определи, сколько активного вещества в одной таблетке. Используй формулу m = M * (p/100)."
     
-    try:
-        response = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=10)
-        if response.status_code == 200:
-            return response.json()['candidates'][0]['content']['parts'][0]['text']
-    except:
-        pass
-    return "Не могу связаться с магией ИИ, но советую перепроверить перевод граммов в миллиграммы!"
+    if "г" in task["q"].lower() and user_answer < correct_answer / 100:
+        return "Кажется, ты забыла перевести граммы (г) в миллиграммы (мг). Помни: в 1 грамме 1000 мг!"
+    
+    if user_answer > correct_answer * 5:
+        return "Твой ответ слишком велик. Проверь, не забыла ли ты разделить общую дозу на количество вещества в одной таблетке?"
+        
+    if abs(user_answer - (task["a"] * 100)) < 1:
+        return "Похоже на ошибку в десятичных знаках. Ты перевела проценты в доли? (Например, 10% — это 0.1)."
+
+    return "Давай рассуждать логически: сначала найди дозу на вес животного, затем найди содержание вещества в таблетке, и в конце раздели первое на второе. Сверься со шпаргалкой!"
 
 # --- КОНТЕНТ ЗАДАЧ ---
 all_tasks = [
@@ -65,28 +67,54 @@ all_tasks = [
 st.title("🐾 Академия им. Скрябина: Тренажер")
 tab_calc, tab_learn, tab_tasks = st.tabs(["🧮 Помощник", "📖 Формулы", "📝 Задачи"])
 
+# Таб с калькулятором (восстановлен для удобства)
+with tab_calc:
+    st.header("Умный калькулятор")
+    c1, c2 = st.columns(2)
+    with c1:
+        m_tab = st.number_input("Вес таблетки (мг)", value=20.0)
+        p_tab = st.number_input("Вещество (%)", value=18.0)
+    with c2:
+        m_ani = st.number_input("Вес животного (кг)", value=8.0)
+        d_ani = st.number_input("Дозировка (мг/кг)", value=1.35)
+    
+    act_v = m_tab * (p_tab / 100)
+    need_v = m_ani * d_ani
+    if act_v > 0:
+        st.metric("Итого таблеток", round(need_v / act_v, 2))
+
+# Таб с формулами
+with tab_learn:
+    st.info("m (в-во в таб) = M (вес таб) * % / 100")
+    st.info("D (нужно всего) = Вес животного * Дозировка")
+    st.info("Количество таблеток = D / m")
+
+# Таб с задачами
 with tab_tasks:
     for cat in ["Базовый", "Практик", "Эксперт"]:
         st.subheader(f"Уровень: {cat}")
         for t in [x for x in all_tasks if x["cat"] == cat]:
-            with st.expander(f"Задача №{t['id']} {'✅' if st.session_state.results.get(t['id']) else ''}"):
+            tid = t["id"]
+            is_solved = st.session_state.results.get(tid, False)
+            
+            with st.expander(f"Задача №{tid} {'✅' if is_solved else ''}"):
                 st.write(t["q"])
-                ans = st.number_input("Ответ:", key=f"ans_{t['id']}", step=0.01)
-                if st.button("Проверить", key=f"btn_{t['id']}"):
-                    if abs(ans - t["a"]) < 0.01:
-                        st.session_state.results[t["id"]] = True
-                        st.session_state.mentor_feedback.pop(t["id"], None)
-                        st.success("Верно!")
-                    else:
-                        st.session_state.results[t["id"]] = False
-                        with st.spinner("Ментор пишет подсказку..."):
-                            st.session_state.mentor_feedback[t["id"]] = call_gemini_mentor(t["q"], ans, t["a"])
+                ans = st.number_input("Ответ:", key=f"ans_{tid}", step=0.01)
                 
-                if t["id"] in st.session_state.mentor_feedback:
-                    st.warning(f"🧙‍♂️ **Ментор:** {st.session_state.mentor_feedback[t['id']]}")
+                if st.button("Проверить", key=f"btn_{tid}"):
+                    if abs(ans - t["a"]) < 0.01:
+                        st.session_state.results[tid] = True
+                        st.session_state.mentor_feedback.pop(tid, None)
+                        st.balloons()
+                    else:
+                        st.session_state.results[tid] = False
+                        st.session_state.mentor_feedback[tid] = get_offline_hint(t, ans)
+                
+                if tid in st.session_state.mentor_feedback:
+                    st.warning(f"🧙‍♂️ **Совет ментора:** {st.session_state.mentor_feedback[tid]}")
 
 # Сайдбар
 st.sidebar.title("📈 Прогресс")
 solved = sum(1 for v in st.session_state.results.values() if v)
 st.sidebar.write(f"Решено: {solved} из 25")
-st.sidebar.progress(solved / 25)
+st.sidebar.progress(min(solved / 25, 1.0))
