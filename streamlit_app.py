@@ -7,6 +7,10 @@ st.set_page_config(
     layout="centered"
 )
 
+# Инициализация состояния сессии для хранения ответов (чтобы не тормозило)
+if 'results' not in st.session_state:
+    st.session_state.results = {}
+
 # Стилизация интерфейса
 st.markdown("""
     <style>
@@ -34,6 +38,13 @@ st.markdown("""
         margin-bottom: 10px;
         border: 1px solid #e2e8f0;
     }
+    .sidebar-logo {
+        font-size: 24px;
+        font-weight: bold;
+        color: #1e3a8a;
+        text-align: center;
+        margin-bottom: 20px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -52,12 +63,12 @@ with tab1:
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Препарат")
-        tab_m = st.number_input("Вес таблетки (мг)", value=20.0)
-        tab_p = st.number_input("Активное вещество (%)", value=18.0)
+        tab_m = st.number_input("Вес таблетки (мг)", value=20.0, key="calc_tab_m")
+        tab_p = st.number_input("Активное вещество (%)", value=18.0, key="calc_tab_p")
     with col2:
         st.subheader("Пациент")
-        anim_m = st.number_input("Вес животного (кг)", value=8.0)
-        anim_d = st.number_input("Дозировка (мг/кг)", value=1.35)
+        anim_m = st.number_input("Вес животного (кг)", value=8.0, key="calc_anim_m")
+        anim_d = st.number_input("Дозировка (мг/кг)", value=1.35, key="calc_anim_d")
 
     res_m = tab_m * (tab_p / 100)
     res_d = anim_m * anim_d
@@ -127,16 +138,45 @@ with tab3:
         cat_tasks = [t for t in all_tasks if t["cat"] == category]
         
         for t in cat_tasks:
-            with st.expander(f"Задача №{t['id']}"):
+            task_id = t["id"]
+            with st.expander(f"Задача №{task_id}"):
                 st.write(t["q"])
-                ans = st.number_input("Твой ответ:", key=f"q_{t['id']}", step=0.01)
-                if st.button("Проверить", key=f"btn_{t['id']}"):
+                
+                # Поле ввода
+                ans = st.number_input("Твой ответ:", key=f"input_{task_id}", step=0.01)
+                
+                # Кнопка проверки
+                if st.button("Проверить", key=f"btn_{task_id}"):
                     if abs(ans - t["a"]) < 0.001:
+                        st.session_state.results[task_id] = True
+                    else:
+                        st.session_state.results[task_id] = False
+                
+                # Отображение результата из session_state (мгновенно)
+                if task_id in st.session_state.results:
+                    if st.session_state.results[task_id]:
                         st.success("🎉 Правильно!")
                     else:
-                        st.error(f"Не совсем. Подсказка: используй формулы из шпаргалки!")
+                        st.error("Не совсем. Проверь расчеты!")
 
-# Сайдбар
-st.sidebar.image("https://upload.wikimedia.org/wikipedia/ru/e/eb/Logo_MBA.png", width=100)
-st.sidebar.markdown("### Прогресс")
-st.sidebar.write("Реши все 25 задач, чтобы чувствовать себя уверенно на экзамене!")
+# Сайдбар (боковая панель)
+with st.sidebar:
+    st.markdown('<div class="sidebar-logo">🎓 МВА им. Скрябина</div>', unsafe_allow_html=True)
+    st.markdown("---")
+    st.markdown("### 📈 Твой прогресс")
+    
+    solved_count = sum(1 for v in st.session_state.results.values() if v)
+    total_count = len(all_tasks)
+    
+    st.write(f"Решено задач: **{solved_count}** из **{total_count}**")
+    progress_bar = st.progress(solved_count / total_count)
+    
+    if solved_count == total_count:
+        st.balloons()
+        st.success("Великолепно! Ты готова к экзамену!")
+    
+    st.markdown("---")
+    st.info("""
+    **Совет:**
+    Если ответ не проходит, убедись, что ты перевела граммы в миллиграммы!
+    """)
