@@ -2,148 +2,91 @@ import streamlit as st
 import requests
 import time
 
-# Настройка страницы
-st.set_page_config(
-    page_title="Ветеринарная математика | МВА им. Скрябина",
-    page_icon="🐾",
-    layout="centered"
-)
+# --- ИНИЦИАЛИЗАЦИЯ И НАСТРОЙКИ ---
+st.set_page_config(page_title="Ветеринарная математика | МВА", page_icon="🐾")
 
-# API Конфигурация Gemini
-API_KEY = ""  # Ключ будет подставлен средой выполнения
-MODEL_ID = "gemini-2.5-flash-preview-09-2025"
+# Получение ключа из Secrets
+API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
-def call_gemini_mentor(task_text, user_answer, correct_answer):
-    """Вызов ИИ-Ментора для помощи ученику"""
-    prompt = f"""
-    Ты — добрый и мудрый ментор по ветеринарной математике в Академии им. Скрябина. 
-    Ученик решает задачу: "{task_text}"
-    Правильный ответ: {correct_answer}
-    Ученик ввел: {user_answer}
-    
-    Твоя задача: НЕ ДАВАТЬ правильный ответ сразу. 
-    1. Подбодри ученика.
-    2. Наводящими вопросами или подсказкой по формуле помоги ему найти ошибку.
-    3. Объясни логику (например, напомни про перевод процентов в доли или граммов в миллиграммы).
-    Пиши кратко и дружелюбно.
-    """
-    
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_ID}:generateContent?key={API_KEY}"
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "systemInstruction": {"parts": [{"text": "Ты ветеринарный ментор. Помогаешь решать задачи на дозировки. Не даешь готовых ответов, ведешь к ним через подсказки."}]}
-    }
-    
-    # Экспоненциальная задержка (retry logic)
-    for delay in [1, 2, 4, 8, 16]:
-        try:
-            response = requests.post(url, json=payload)
-            if response.status_code == 200:
-                result = response.json()
-                return result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', "Хмм, что-то я задумался. Попробуй еще раз!")
-            time.sleep(delay)
-        except:
-            time.sleep(delay)
-    return "Извини, связь с ментором прервалась. Проверь формулу m = M * p!"
-
-# Инициализация состояния сессии
 if 'results' not in st.session_state:
     st.session_state.results = {}
 if 'mentor_feedback' not in st.session_state:
     st.session_state.mentor_feedback = {}
 
-# Стилизация
-st.markdown("""
-    <style>
-    .main { background-color: #f8fafc; }
-    .stButton>button { width: 100%; border-radius: 8px; background-color: #1e3a8a; color: white; }
-    .formula-card { background-color: #ffffff; padding: 20px; border-radius: 10px; border-left: 5px solid #10b981; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 20px; }
-    .sidebar-logo { font-size: 24px; font-weight: bold; color: #1e3a8a; text-align: center; margin-bottom: 20px; }
-    .mentor-box { background-color: #fff4e6; padding: 15px; border-radius: 10px; border-left: 5px solid #f59e0b; margin-top: 10px; font-style: italic; }
-    </style>
-    """, unsafe_allow_html=True)
+# --- ФУНКЦИЯ МЕНТОРА ---
+def call_gemini_mentor(task_text, user_answer, correct_answer):
+    if not API_KEY:
+        return "⚠️ Ошибка: API ключ не настроен в Secrets. Проверь формулу m = M * (p/100)!"
+    
+    prompt = f"Ученик решает: {task_text}. Правильно: {correct_answer}, введено: {user_answer}. Подбодри и дай наводку на формулу, не называя сам ответ."
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={API_KEY}"
+    
+    try:
+        response = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=10)
+        if response.status_code == 200:
+            return response.json()['candidates'][0]['content']['parts'][0]['text']
+    except:
+        pass
+    return "Не могу связаться с магией ИИ, но советую перепроверить перевод граммов в миллиграммы!"
 
-# Заголовок
-st.title("🐾 Ветеринарная математика")
-st.caption("Тренажер с ИИ-Ментором для МВА им. К.И. Скрябина")
+# --- КОНТЕНТ ЗАДАЧ ---
+all_tasks = [
+    # БАЗОВЫЙ
+    {"id": 1, "cat": "Базовый", "q": "Таблетка 100 мг, 10% активного вещества. Сколько это в мг?", "a": 10.0},
+    {"id": 2, "cat": "Базовый", "q": "Собака 10 кг, доза 5 мг/кг. Какова общая доза в мг?", "a": 50.0},
+    {"id": 3, "cat": "Базовый", "q": "Нужно 20 мг, в таблетке 10 мг. Сколько таблеток дать?", "a": 2.0},
+    {"id": 4, "cat": "Базовый", "q": "Ампула 5 мл, 20% вещества. Сколько мл чистого вещества?", "a": 1.0},
+    {"id": 5, "cat": "Базовый", "q": "Таблетка 400 мг, 50% сахара. Сколько мг сахара?", "a": 200.0},
+    {"id": 6, "cat": "Базовый", "q": "Доза 2 мг/кг, вес 3 кг, в таб 6 мг чистого в-ва. Сколько таблеток?", "a": 1.0},
+    {"id": 7, "cat": "Базовый", "q": "Животное 20 кг, нужно 40 мг. Сколько это мг на 1 кг?", "a": 2.0},
+    {"id": 8, "cat": "Базовый", "q": "Упаковка 10 таб по 5 мг. Сколько всего мг в упаковке?", "a": 50.0},
+    # ПРАКТИК
+    {"id": 9, "cat": "Практик", "q": "Таблетка 30 мг (15%); доза 1 мг/кг, вес 9 кг. Сколько таблеток?", "a": 2.0},
+    {"id": 10, "cat": "Практик", "q": "Таблетка 50 мг (12%); доза 3 мг/кг, вес 4 кг. Сколько таблеток?", "a": 2.0},
+    {"id": 11, "cat": "Практик", "q": "Щенок 6 кг; доза 2,5 мг/кг; таб 20 мг (15%). Сколько таблеток?", "a": 5.0},
+    {"id": 12, "cat": "Практик", "q": "Сироп 5%, 1 мл весит 1000 мг. Сколько мг в-ва в 1 мл?", "a": 50.0},
+    {"id": 13, "cat": "Практик", "q": "Кот 2 кг; доза 4,5 мг/кг; таб 45 мг (20%). Сколько таблеток?", "a": 1.0},
+    {"id": 14, "cat": "Практик", "q": "Телёнок 40 кг; нужно 0,8 мг/кг; таб 16 мг чистого в-ва. Сколько таблеток?", "a": 2.0},
+    {"id": 15, "cat": "Практик", "q": "В таб 10 мг в-ва — это 5% массы. Сколько мг весит таблетка?", "a": 200.0},
+    {"id": 16, "cat": "Практик", "q": "Кошка 4 кг, дали 0,5 таб (в целой 10 мг). Какая доза (мг/кг)?", "a": 1.25},
+    {"id": 17, "cat": "Практик", "q": "Даем 3 таб/сутки (в таб 2 мг) коту 3 кг. Какая доза (мг/кг)?", "a": 2.0},
+    # ЭКСПЕРТ
+    {"id": 18, "cat": "Эксперт", "q": "Доза 1.2 мг/кг (2р в день), вес 10 кг, таб 12 мг. Сколько таб в СУТКИ?", "a": 2.0},
+    {"id": 19, "cat": "Эксперт", "q": "Таблетка 0.5 г, в ней 4% вещества. Сколько это мг?", "a": 20.0},
+    {"id": 20, "cat": "Эксперт", "q": "Доза 1.35 мг/кг, вес 8 кг, таб 20 мг (18%). Сколько таблеток?", "a": 3.0},
+    {"id": 21, "cat": "Эксперт", "q": "Раствор 10% (100 мг/мл). Нужно 250 мг. Сколько мл набрать?", "a": 2.5},
+    {"id": 22, "cat": "Эксперт", "q": "Кобыла 500 кг, доза 0.1 мг/кг, таб 25 мг чистого в-ва. Сколько таблеток?", "a": 2.0},
+    {"id": 23, "cat": "Эксперт", "q": "Таблетка 250 мг, в ней 0.05 г вещества. Какой % содержания?", "a": 20.0},
+    {"id": 24, "cat": "Эксперт", "q": "Сутки: 10 мг/кг, вес 12 кг, 3 приёма, таб 20 мг. Сколько таб на ОДИН прием?", "a": 2.0},
+    {"id": 25, "cat": "Эксперт", "q": "Препарат А: 200 мг (10%). Препарат Б: 100 мг (20%). Сколько мг в таб А?", "a": 20.0},
+]
 
-# Навигация
-tab1, tab2, tab3 = st.tabs(["🧮 Калькулятор", "📖 Шпаргалка", "📝 Задачник (25 задач)"])
+# --- ИНТЕРФЕЙС ---
+st.title("🐾 Академия им. Скрябина: Тренажер")
+tab_calc, tab_learn, tab_tasks = st.tabs(["🧮 Помощник", "📖 Формулы", "📝 Задачи"])
 
-# --- ТАБ 1: КАЛЬКУЛЯТОР ---
-with tab1:
-    st.header("Умный помощник")
-    col1, col2 = st.columns(2)
-    with col1:
-        tab_m = st.number_input("Вес таблетки (мг)", value=20.0, key="calc_tab_m")
-        tab_p = st.number_input("Активное вещество (%)", value=18.0, key="calc_tab_p")
-    with col2:
-        anim_m = st.number_input("Вес животного (кг)", value=8.0, key="calc_anim_m")
-        anim_d = st.number_input("Дозировка (мг/кг)", value=1.35, key="calc_anim_d")
-
-    res_m = tab_m * (tab_p / 100)
-    res_d = anim_m * anim_d
-    res_n = res_d / res_m if res_m > 0 else 0
-    st.divider()
-    c1, c2, c3 = st.columns(3)
-    c1.metric("В 1 таблетке (мг)", f"{res_m:.2f}")
-    c2.metric("Нужно всего (мг)", f"{res_d:.2f}")
-    c3.metric("Итого таблеток", f"{res_n:.2f}")
-
-# --- ТАБ 2: ШПАРГАЛКА ---
-with tab2:
-    st.header("Твои подсказки")
-    st.markdown("""
-    <div class="formula-card">
-        <h4>1. Лекарство в таблетке: m = M × p</h4>
-        <h4>2. Потребность животного: D = Вес × Дозировка</h4>
-        <h4>3. Количество таблеток: n = D / m</h4>
-    </div>
-    """, unsafe_allow_html=True)
-
-# --- ТАБ 3: ЗАДАЧНИК ---
-with tab3:
-    all_tasks = [
-        {"id": 1, "cat": "Базовый", "q": "Таблетка 100 мг, 10% витаминов. Сколько мг витаминов в таблетке?", "a": 10.0},
-        {"id": 2, "cat": "Базовый", "q": "Собака 10 кг, доза 5 мг/кг. Какова общая доза (мг)?", "a": 50.0},
-        {"id": 3, "cat": "Базовый", "q": "Нужно 20 мг, в таблетке 10 мг. Сколько таблеток дать?", "a": 2.0},
-        {"id": 9, "cat": "Практик", "q": "Таблетка 30 мг (15%); доза 1 мг/кг, вес 9 кг. Сколько таблеток?", "a": 2.0},
-        {"id": 19, "cat": "Эксперт", "q": "Таблетка 0.5 г, в ней 4% вещества. Сколько это мг?", "a": 20.0},
-        {"id": 20, "cat": "Эксперт", "q": "Доза 1.35 мг/кг, вес 8 кг, таб 20 мг (18%). Сколько таблеток?", "a": 3.0},
-        # ... (здесь могут быть остальные задачи из вашего списка)
-    ]
-
-    for category in ["Базовый", "Практик", "Эксперт"]:
-        st.subheader(f"Уровень: {category}")
-        cat_tasks = [t for t in all_tasks if t["cat"] == category]
-        
-        for t in cat_tasks:
-            tid = t["id"]
-            with st.expander(f"Задача №{tid} {'✅' if st.session_state.results.get(tid) else ''}"):
+with tab_tasks:
+    for cat in ["Базовый", "Практик", "Эксперт"]:
+        st.subheader(f"Уровень: {cat}")
+        for t in [x for x in all_tasks if x["cat"] == cat]:
+            with st.expander(f"Задача №{t['id']} {'✅' if st.session_state.results.get(t['id']) else ''}"):
                 st.write(t["q"])
-                u_ans = st.number_input("Твой ответ:", key=f"in_{tid}", step=0.01)
-                
-                col_btn1, col_btn2 = st.columns([1, 2])
-                if col_btn1.button("Проверить", key=f"b_{tid}"):
-                    if abs(u_ans - t["a"]) < 0.001:
-                        st.session_state.results[tid] = True
-                        st.session_state.mentor_feedback.pop(tid, None)
-                        st.success("🎉 Правильно!")
+                ans = st.number_input("Ответ:", key=f"ans_{t['id']}", step=0.01)
+                if st.button("Проверить", key=f"btn_{t['id']}"):
+                    if abs(ans - t["a"]) < 0.01:
+                        st.session_state.results[t["id"]] = True
+                        st.session_state.mentor_feedback.pop(t["id"], None)
+                        st.success("Верно!")
                     else:
-                        st.session_state.results[tid] = False
-                        with st.spinner("Ментор изучает твой ответ..."):
-                            feedback = call_gemini_mentor(t["q"], u_ans, t["a"])
-                            st.session_state.mentor_feedback[tid] = feedback
+                        st.session_state.results[t["id"]] = False
+                        with st.spinner("Ментор пишет подсказку..."):
+                            st.session_state.mentor_feedback[t["id"]] = call_gemini_mentor(t["q"], ans, t["a"])
                 
-                if tid in st.session_state.mentor_feedback:
-                    st.markdown(f'<div class="mentor-box"><b>🧙‍♂️ Ментор:</b><br>{st.session_state.mentor_feedback[tid]}</div>', unsafe_allow_html=True)
+                if t["id"] in st.session_state.mentor_feedback:
+                    st.warning(f"🧙‍♂️ **Ментор:** {st.session_state.mentor_feedback[t['id']]}")
 
 # Сайдбар
-with st.sidebar:
-    st.markdown('<div class="sidebar-logo">🎓 МВА им. Скрябина</div>', unsafe_allow_html=True)
-    st.markdown("---")
-    st.markdown("### 📈 Прогресс")
-    solved = sum(1 for v in st.session_state.results.values() if v)
-    st.write(f"Решено: **{solved}**")
-    st.progress(min(solved / 25, 1.0))
-    if solved >= 5: st.success("Отличное начало!")
+st.sidebar.title("📈 Прогресс")
+solved = sum(1 for v in st.session_state.results.values() if v)
+st.sidebar.write(f"Решено: {solved} из 25")
+st.sidebar.progress(solved / 25)
